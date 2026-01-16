@@ -33,8 +33,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
 {
   "server": { "port": 2000 },
   "output": {
-    "nmea": { "path": "data/nmea_logs", "rotate_seconds": 300 },
-    "csv":  { "path": "data/csv_logs",  "rotate_seconds": 300 }
+    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
+    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
   }
 }
 ```
@@ -50,8 +50,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
     "protocol": "tcpip"
   },
   "output": {
-    "nmea": { "path": "data/nmea_logs", "rotate_seconds": 300 },
-    "csv":  { "path": "data/csv_logs",  "rotate_seconds": 300 }
+    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
+    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
   }
 }
 ```
@@ -68,8 +68,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
     "broadcast": true
   },
   "output": {
-    "nmea": { "path": "data/nmea_logs", "rotate_seconds": 300 },
-    "csv":  { "path": "data/csv_logs",  "rotate_seconds": 300 }
+    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
+    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
   }
 }
 ```
@@ -82,10 +82,10 @@ If you use relative paths like:
 "path": "data/nmea_logs"
 ```
 
-they are resolved relative to the **working directory**. In Docker, the working directory is `/app`, so outputs go to:
+They are resolved relative to the **working directory**. In Docker, the working directory is `/app`, so outputs go to:
 
-- `/app/data/nmea_logs`
-- `/app/data/csv_logs`
+- `/app/data/nmea`
+- `/app/data/csv`
 
 To persist outputs, mount a host folder (or volume) to `/app/data`.
 
