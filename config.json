@@ -1,0 +1,15 @@
+{
+  "server": {
+    "port": 2000
+  },
+  "output": {
+    "nmea": {
+      "path": "data/nmea_logs",
+      "rotate_seconds": 300
+    },
+    "csv": {
+      "path": "data/csv_logs",
+      "rotate_seconds": 300
+    }
+  }
+}
