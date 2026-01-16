@@ -4,11 +4,11 @@
   },
   "output": {
     "nmea": {
-      "path": "data/nmea_logs",
+      "path": "data/nmea",
       "rotate_seconds": 300
     },
     "csv": {
-      "path": "data/csv_logs",
+      "path": "data/logs",
       "rotate_seconds": 300
     }
   }
