@@ -7,7 +7,7 @@ Features
 - Receives NMEA 0183 sentences line-delimited
 - Logs received sentences via logging
 - Writes ALL raw received sentences to rotating .nmea files:
-    aisnet_YYYYMMDDZhhmmss.nmea  (UTC timestamp)
+    YYYY/MM/DD/aisnet_YYYYMMDDZhh00.nmea  (UTC hour bucket)
 - Decodes AIS AIVDM/AIVDO (single + multi-fragment reassembly) using pyais
 - For each valid AIS position report (types 1,2,3,18,19,27) append a CSV row:
     TIMESTAMP, MMSI, LON, LAT, HEADING, SPEED
@@ -60,6 +60,16 @@ def setup_logging() -> None:
 def utc_stamp_compact(dt: Optional[datetime] = None) -> str:
     dt = dt or datetime.now(timezone.utc)
     return dt.strftime("%Y%m%dZ%H%M%S")
+
+
+def utc_hour_stamp(dt: Optional[datetime] = None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    return dt.strftime("%Y%m%dZ%H") + "00"
+
+
+def utc_date_path(dt: Optional[datetime] = None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    return dt.strftime("%Y/%m/%d")
 
 
 def utc_iso8601_z(dt: Optional[datetime] = None) -> str:
@@ -159,7 +169,7 @@ class RotatingTextWriter:
         self.rotate(force=True)
 
     def _make_filename(self) -> Path:
-        return self.out_dir / f"aisnet_{utc_stamp_compact()}.{self.suffix}"
+        return self.out_dir / utc_date_path() / f"aisnet_{utc_hour_stamp()}.{self.suffix}"
 
     def rotate(self, force: bool = False) -> None:
         now = time.time()
@@ -174,6 +184,7 @@ class RotatingTextWriter:
                 logging.exception("Failed closing %s file: %s", self.suffix, self._current_path)
 
         self._current_path = self._make_filename()
+        self._current_path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self._current_path, "a", encoding="utf-8", buffering=1)  # line-buffered
         self._opened_ts = now
         logging.info("%s file opened: %s", self.suffix.upper(), self._current_path)
@@ -213,7 +224,7 @@ class RotatingCsvWriter:
         self.rotate(force=True)
 
     def _make_filename(self) -> Path:
-        return self.out_dir / f"aisnet_{utc_stamp_compact()}.csv"
+        return self.out_dir / utc_date_path() / f"aisnet_{utc_hour_stamp()}.csv"
 
     def rotate(self, force: bool = False) -> None:
         now = time.time()
@@ -228,6 +239,7 @@ class RotatingCsvWriter:
                 logging.exception("Failed closing CSV file: %s", self._current_path)
 
         self._current_path = self._make_filename()
+        self._current_path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self._current_path, "a", encoding="utf-8", newline="")
         self._writer = csv.writer(self._fh)
 
