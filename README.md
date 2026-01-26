@@ -18,6 +18,7 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
 - File rotation happens:
   - at each server start (new files)
   - then every configured `rotate_seconds`
+- Optional web server that hosts output files for download (`/nmea` and `/csv`)
 - **Repeater (optional):**
   - If `repeater.remoteHost` and `repeater.remotePort` are set, each received raw AIS sentence
     (`!AIVDM/!AIVDO`) is forwarded to the remote endpoint using **TCP** (`tcpip`) or **UDP** (`udp`).
@@ -44,7 +45,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
   "output": {
     "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
     "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
-  }
+  },
+  "webserver_server": { "enabled": true, "port": 8081 }
 }
 ```
 
@@ -61,7 +63,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
   "output": {
     "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
     "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
-  }
+  },
+  "webserver_server": { "enabled": true, "port": 8081 }
 }
 ```
 
@@ -79,9 +82,18 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
   "output": {
     "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
     "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
-  }
+  },
+  "webserver_server": { "enabled": true, "port": 8081 }
 }
 ```
+
+### Output web server
+
+Enable `webserver_server` to serve the output directories over HTTP:
+
+- `http://localhost:8081/` shows links
+- `http://localhost:8081/nmea/` lists raw `.nmea` outputs
+- `http://localhost:8081/csv/` lists `.csv` outputs
 
 ### Note about relative output paths and Docker
 
