@@ -17,7 +17,7 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
   - `TIMESTAMP` is ISO 8601 UTC (e.g. `2026-01-16T11:03:52Z`)
 - File rotation happens:
   - at each server start (new files)
-  - then every configured `rotate_seconds`
+  - then at 00 minutes of each UTC hour
 - Optional web server that hosts output files for download (`/nmea` and `/csv`)
 - **Repeater (optional):**
   - If `repeater.remoteHost` and `repeater.remotePort` are set, each received raw AIS sentence
@@ -43,8 +43,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
 {
   "server": { "port": 2000 },
   "output": {
-    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
-    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
+    "nmea": { "path": "data/nmea" },
+    "csv":  { "path": "data/csv" }
   },
   "webserver_server": { "enabled": true, "port": 8081 }
 }
@@ -61,8 +61,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
     "protocol": "tcpip"
   },
   "output": {
-    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
-    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
+    "nmea": { "path": "data/nmea" },
+    "csv":  { "path": "data/csv" }
   },
   "webserver_server": { "enabled": true, "port": 8081 }
 }
@@ -80,8 +80,8 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
     "broadcast": true
   },
   "output": {
-    "nmea": { "path": "data/nmea", "rotate_seconds": 600 },
-    "csv":  { "path": "data/csv",  "rotate_seconds": 600 }
+    "nmea": { "path": "data/nmea" },
+    "csv":  { "path": "data/csv" }
   },
   "webserver_server": { "enabled": true, "port": 8081 }
 }
