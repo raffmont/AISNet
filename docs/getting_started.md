@@ -11,7 +11,7 @@ cd AISNet
 
 ## 2. Review configuration
 
-Open `config.json` and confirm the TCP port and output paths are correct for your environment. The default configuration listens on port `2000` and writes to `data/nmea` and `data/csv`.
+Open `config.json` and confirm the TCP port, output paths, and optional web server settings are correct for your environment. The default configuration listens on port `2000`, writes to `data/nmea` and `data/csv`, and can optionally host those outputs over HTTP on port `8081`.
 
 ## 3. Install and run AISNet
 
@@ -38,3 +38,5 @@ By default, AISNet writes:
 - Position reports to `data/csv` as rotating `.csv` files
 
 If you are running via Docker, ensure `./data` is mounted to `/app/data` so these outputs persist.
+
+If `webserver_server.enabled` is true, you can browse the outputs at `http://localhost:8081/` (links to `/nmea/` and `/csv/`).

@@ -35,6 +35,12 @@ This guide covers installing and running AISNet locally with Python or via Docke
    nc 127.0.0.1 2000
    ```
 
+6. (Optional) Browse outputs if the web server is enabled:
+
+   ```bash
+   xdg-open http://localhost:8081/
+   ```
+
 ## Docker
 
 ### Build
@@ -52,6 +58,7 @@ mkdir -p data/nmea_logs data/csv_logs
 
 docker run --rm -it \
   -p 2000:2000/tcp \
+  -p 8081:8081 \
   -v "$PWD/config.json:/app/config.json:ro" \
   -v "$PWD/data:/app/data" \
   aisnet:latest
@@ -70,6 +77,7 @@ services:
 
     ports:
       - "2000:2000/tcp"
+      - "8081:8081"
 
     volumes:
       - ./config.json:/app/config.json:ro

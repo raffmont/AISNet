@@ -13,6 +13,7 @@ Features
     TIMESTAMP, MMSI, LON, LAT, HEADING, SPEED
   with TIMESTAMP as ISO 8601 UTC
 - Rotates .nmea and .csv files at server start and every configured number of seconds
+- Optional web server to browse output files
 - Optional repeater:
     If repeater.remoteHost and repeater.remotePort are set, each received raw AIS sentence
     (!AIVDM/!AIVDO) is forwarded to the remote endpoint using TCP or UDP (configurable).
@@ -29,9 +30,12 @@ import csv
 import json
 import logging
 import socket
+import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -98,11 +102,18 @@ class RepeaterCfg:
 
 
 @dataclass
+class WebServerCfg:
+    enabled: bool = False
+    port: int = 8081
+
+
+@dataclass
 class ServerConfig:
     port: int
     nmea: OutputCfg
     csv: OutputCfg
     repeater: RepeaterCfg
+    webserver: WebServerCfg
 
     @staticmethod
     def from_json(path: str) -> "ServerConfig":
@@ -131,6 +142,12 @@ class ServerConfig:
                 broadcast=bool(rep_cfg_raw.get("broadcast", False)),
             )
 
+            web_cfg_raw = cfg.get("webserver_server", {}) or {}
+            webserver = WebServerCfg(
+                enabled=bool(web_cfg_raw.get("enabled", False)),
+                port=int(web_cfg_raw.get("port", 8081)) if web_cfg_raw.get("port") is not None else 8081,
+            )
+
         except Exception as e:
             raise ValueError(f"Invalid config structure: {e}") from e
 
@@ -147,7 +164,10 @@ class ServerConfig:
             if repeater.protocol not in ("tcpip", "udp"):
                 raise ValueError('repeater.protocol must be "tcpip" or "udp"')
 
-        return ServerConfig(port=port, nmea=nmea, csv=csv_out, repeater=repeater)
+        if webserver.enabled and not (1 <= webserver.port <= 65535):
+            raise ValueError("webserver_server.port must be in 1..65535")
+
+        return ServerConfig(port=port, nmea=nmea, csv=csv_out, repeater=repeater, webserver=webserver)
 
 
 # ----------------------------
@@ -542,6 +562,88 @@ class AisReassembler:
 
 
 # ----------------------------
+# Output web server
+# ----------------------------
+class OutputHttpHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, nmea_root: Path, csv_root: Path, **kwargs) -> None:
+        self.nmea_root = nmea_root
+        self.csv_root = csv_root
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("", "/"):
+            self._send_index()
+            return
+        if not (parsed.path.startswith("/nmea") or parsed.path.startswith("/csv")):
+            self.send_error(404, "Not Found")
+            return
+        super().do_GET()
+
+    def translate_path(self, path: str) -> str:
+        parsed = urllib.parse.urlparse(path)
+        clean_path = parsed.path
+        if clean_path.startswith("/nmea"):
+            base = self.nmea_root
+            suffix = clean_path[len("/nmea"):]
+        elif clean_path.startswith("/csv"):
+            base = self.csv_root
+            suffix = clean_path[len("/csv"):]
+        else:
+            return str(self.nmea_root / "__invalid__")
+
+        suffix = suffix.lstrip("/")
+        resolved = (base / suffix).resolve()
+        try:
+            resolved.relative_to(base)
+        except ValueError:
+            return str(base / "__invalid__")
+        return str(resolved)
+
+    def _send_index(self) -> None:
+        body = (
+            "<html><head><title>AISNet Outputs</title></head>"
+            "<body>"
+            "<h1>AISNet Output Files</h1>"
+            "<ul>"
+            '<li><a href="/nmea/">Raw NMEA outputs</a></li>'
+            '<li><a href="/csv/">CSV outputs</a></li>'
+            "</ul>"
+            "</body></html>"
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def start_output_web_server(
+    cfg: WebServerCfg,
+    nmea_dir: Union[str, Path],
+    csv_dir: Union[str, Path],
+) -> Optional[ThreadingHTTPServer]:
+    if not cfg.enabled:
+        return None
+
+    nmea_root = Path(nmea_dir).resolve()
+    csv_root = Path(csv_dir).resolve()
+
+    handler = lambda *args, **kwargs: OutputHttpHandler(  # noqa: E731
+        *args, nmea_root=nmea_root, csv_root=csv_root, **kwargs
+    )
+
+    httpd = ThreadingHTTPServer(("0.0.0.0", cfg.port), handler)
+    thread = threading.Thread(target=httpd.serve_forever, name="aisnet-webserver", daemon=True)
+    thread.start()
+    logging.info(
+        "Output web server enabled on http://0.0.0.0:%d (paths: /nmea/, /csv/)",
+        cfg.port,
+    )
+    return httpd
+
+
+# ----------------------------
 # TCP server
 # ----------------------------
 def handle_client(
@@ -609,6 +711,9 @@ def run_server(cfg: ServerConfig) -> None:
     nmea_writer = RotatingTextWriter(cfg.nmea.path, cfg.nmea.rotate_seconds, suffix="nmea")
     csv_writer = RotatingCsvWriter(cfg.csv.path, cfg.csv.rotate_seconds)
     repeater = Repeater(cfg.repeater) if cfg.repeater.enabled() else None
+    web_server: Optional[ThreadingHTTPServer] = None
+    if cfg.webserver.enabled:
+        web_server = start_output_web_server(cfg.webserver, cfg.nmea.path, cfg.csv.path)
 
     try:
         logging.info("Starting TCP server on 0.0.0.0:%d", cfg.port)
@@ -627,6 +732,9 @@ def run_server(cfg: ServerConfig) -> None:
                 handle_client(conn, addr, nmea_writer, csv_writer, repeater)
 
     finally:
+        if web_server:
+            web_server.shutdown()
+            web_server.server_close()
         if repeater:
             repeater.close()
         nmea_writer.close()
@@ -634,7 +742,9 @@ def run_server(cfg: ServerConfig) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="AIS NMEA TCP server with rotating NMEA + CSV outputs and repeater")
+    parser = argparse.ArgumentParser(
+        description="AIS NMEA TCP server with rotating NMEA + CSV outputs, optional web server, and repeater"
+    )
     parser.add_argument("-c", "--config", default="config.json", help="Path to JSON configuration file")
     args = parser.parse_args()
 

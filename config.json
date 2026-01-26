@@ -11,5 +11,9 @@
       "path": "data/logs",
       "rotate_seconds": 3600
     }
+  },
+  "webserver_server": {
+    "enabled": true,
+    "port": 8081
   }
 }
