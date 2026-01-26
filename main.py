@@ -12,7 +12,7 @@ Features
 - For each valid AIS position report (types 1,2,3,18,19,27) append a CSV row:
     TIMESTAMP, MMSI, LON, LAT, HEADING, SPEED
   with TIMESTAMP as ISO 8601 UTC
-- Rotates .nmea and .csv files at server start and every configured number of seconds
+- Rotates .nmea and .csv files at server start and at 00 minutes of each UTC hour
 - Optional web server to browse output files
 - Optional repeater:
     If repeater.remoteHost and repeater.remotePort are set, each received raw AIS sentence
@@ -87,7 +87,6 @@ def utc_iso8601_z(dt: Optional[datetime] = None) -> str:
 @dataclass
 class OutputCfg:
     path: str
-    rotate_seconds: int
 
 
 @dataclass
@@ -126,11 +125,9 @@ class ServerConfig:
             # output
             nmea = OutputCfg(
                 path=str(cfg["output"]["nmea"]["path"]),
-                rotate_seconds=int(cfg["output"]["nmea"]["rotate_seconds"]),
             )
             csv_out = OutputCfg(
                 path=str(cfg["output"]["csv"]["path"]),
-                rotate_seconds=int(cfg["output"]["csv"]["rotate_seconds"]),
             )
 
             # repeater (optional)
@@ -153,11 +150,6 @@ class ServerConfig:
 
         if not (1 <= port <= 65535):
             raise ValueError("server.port must be in 1..65535")
-        if nmea.rotate_seconds <= 0:
-            raise ValueError("output.nmea.rotate_seconds must be > 0")
-        if csv_out.rotate_seconds <= 0:
-            raise ValueError("output.csv.rotate_seconds must be > 0")
-
         if repeater.enabled():
             if not (1 <= int(repeater.remotePort) <= 65535):
                 raise ValueError("repeater.remotePort must be in 1..65535")
@@ -176,14 +168,13 @@ class ServerConfig:
 class RotatingTextWriter:
     """Rotating line-based text writer for .nmea."""
 
-    def __init__(self, out_dir: Union[str, Path], rotate_seconds: int, suffix: str) -> None:
+    def __init__(self, out_dir: Union[str, Path], suffix: str) -> None:
         self.out_dir = Path(out_dir)
-        self.rotate_seconds = rotate_seconds
         self.suffix = suffix
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
         self._fh = None
-        self._opened_ts = 0.0
+        self._current_stamp: Optional[str] = None
         self._current_path: Optional[Path] = None
 
         self.rotate(force=True)
@@ -192,8 +183,8 @@ class RotatingTextWriter:
         return self.out_dir / utc_date_path() / f"aisnet_{utc_hour_stamp()}.{self.suffix}"
 
     def rotate(self, force: bool = False) -> None:
-        now = time.time()
-        if (not force) and self._fh and (now - self._opened_ts) < self.rotate_seconds:
+        stamp = utc_hour_stamp()
+        if (not force) and self._fh and self._current_stamp == stamp:
             return
 
         if self._fh:
@@ -206,7 +197,7 @@ class RotatingTextWriter:
         self._current_path = self._make_filename()
         self._current_path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self._current_path, "a", encoding="utf-8", buffering=1)  # line-buffered
-        self._opened_ts = now
+        self._current_stamp = stamp
         logging.info("%s file opened: %s", self.suffix.upper(), self._current_path)
 
     def write_line(self, line: str) -> None:
@@ -231,14 +222,13 @@ class RotatingCsvWriter:
 
     HEADER = ["TIMESTAMP", "MMSI", "LON", "LAT", "HEADING", "SPEED"]
 
-    def __init__(self, out_dir: Union[str, Path], rotate_seconds: int) -> None:
+    def __init__(self, out_dir: Union[str, Path]) -> None:
         self.out_dir = Path(out_dir)
-        self.rotate_seconds = rotate_seconds
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
         self._fh = None
         self._writer: Optional[csv.writer] = None
-        self._opened_ts = 0.0
+        self._current_stamp: Optional[str] = None
         self._current_path: Optional[Path] = None
 
         self.rotate(force=True)
@@ -247,8 +237,8 @@ class RotatingCsvWriter:
         return self.out_dir / utc_date_path() / f"aisnet_{utc_hour_stamp()}.csv"
 
     def rotate(self, force: bool = False) -> None:
-        now = time.time()
-        if (not force) and self._fh and (now - self._opened_ts) < self.rotate_seconds:
+        stamp = utc_hour_stamp()
+        if (not force) and self._fh and self._current_stamp == stamp:
             return
 
         if self._fh:
@@ -272,7 +262,7 @@ class RotatingCsvWriter:
             self._writer.writerow(self.HEADER)
             self._fh.flush()
 
-        self._opened_ts = now
+        self._current_stamp = stamp
         logging.info("CSV file opened: %s", self._current_path)
 
     def append_row(self, timestamp: str, mmsi: Any, lon: Any, lat: Any, heading: Any, speed: Any) -> None:
@@ -708,8 +698,8 @@ def run_server(cfg: ServerConfig) -> None:
     if ais_decode is None:
         logging.warning("pyais is not installed. Run: pip install -r requirements.txt")
 
-    nmea_writer = RotatingTextWriter(cfg.nmea.path, cfg.nmea.rotate_seconds, suffix="nmea")
-    csv_writer = RotatingCsvWriter(cfg.csv.path, cfg.csv.rotate_seconds)
+    nmea_writer = RotatingTextWriter(cfg.nmea.path, suffix="nmea")
+    csv_writer = RotatingCsvWriter(cfg.csv.path)
     repeater = Repeater(cfg.repeater) if cfg.repeater.enabled() else None
     web_server: Optional[ThreadingHTTPServer] = None
     if cfg.webserver.enabled:
