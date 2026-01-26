@@ -142,64 +142,166 @@ A robust split is **temporal** to avoid leakage:
 
 Keep entire vessel trajectories within a split when possible to avoid mixing future information.
 
-## Practical preparation example (Python)
+## End-to-end, ready-to-run Python example
 
-This example uses `pandas` to clean, resample, and split. Adapt the input path to your decoded CSVs.
+The script below performs **all steps**: download the full dataset from the AISNet CSV server, normalize to a canonical schema, clean/filter, resample into trajectories, and split into train/validation/test. It uses only `requests` and `pandas` (plus the standard library).
+
+> Tip: the full dataset is large. Run this on a machine with sufficient disk space and memory, or adjust the downloader to a smaller time range.
 
 ```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import Iterable, List
+import io
+
 import pandas as pd
+import requests
 
-raw_path = Path("data/raw/extracted/ais_positions.csv")
-processed_dir = Path("data/processed")
-processed_dir.mkdir(parents=True, exist_ok=True)
+BASE_URL = "https://data.meteo.uniparthenope.it/instruments/aisnet0/csv"
+RAW_DIR = Path("data/raw/aisnet")
+PROCESSED_DIR = Path("data/processed")
+SPLITS_DIR = Path("data/splits")
+RESAMPLE_FREQ = "5min"
+MIN_POINTS = 20
 
-# Load raw data
-frame = pd.read_csv(raw_path)
+RAW_DIR.mkdir(parents=True, exist_ok=True)
+PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+SPLITS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Rename to canonical columns if needed
-frame = frame.rename(columns={
-    "TIMESTAMP": "timestamp",
-    "MMSI": "mmsi",
-    "LAT": "lat",
-    "LON": "lon",
-    "HEADING": "heading",
-    "SPEED": "sog",
-})
 
-# Parse timestamps and clean
-frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-frame = frame.dropna(subset=["timestamp", "mmsi", "lat", "lon"])
-frame = frame[(frame["lat"].between(-90, 90)) & (frame["lon"].between(-180, 180))]
-frame = frame.drop_duplicates(subset=["timestamp", "mmsi", "lat", "lon"])
+@dataclass
+class Link:
+    href: str
 
-# Sort and resample per vessel (example: 5-minute grid)
-frame = frame.sort_values(["mmsi", "timestamp"])
 
-trajectories = []
-for mmsi, group in frame.groupby("mmsi"):
-    group = group.set_index("timestamp").resample("5min").mean(numeric_only=True)
-    group["mmsi"] = mmsi
-    group = group.dropna(subset=["lat", "lon"])
-    if len(group) >= 20:
-        trajectories.append(group.reset_index())
+class LinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: List[Link] = []
 
-processed = pd.concat(trajectories, ignore_index=True)
-processed.to_parquet(processed_dir / "ais_positions_resampled.parquet", index=False)
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        href = dict(attrs).get("href")
+        if href:
+            self.links.append(Link(href=href))
 
-# Temporal split
-processed = processed.sort_values("timestamp")
 
-n_total = len(processed)
-train_end = int(n_total * 0.70)
-valid_end = int(n_total * 0.85)
+def list_directory(url: str) -> list[str]:
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    parser = LinkParser()
+    parser.feed(response.text)
+    return [link.href for link in parser.links if link.href and not link.href.startswith("?")]
 
-splits_dir = Path("data/splits")
-splits_dir.mkdir(parents=True, exist_ok=True)
 
-processed.iloc[:train_end].to_parquet(splits_dir / "train.parquet", index=False)
-processed.iloc[train_end:valid_end].to_parquet(splits_dir / "valid.parquet", index=False)
-processed.iloc[valid_end:].to_parquet(splits_dir / "test.parquet", index=False)
+def iter_csv_urls(base_url: str) -> Iterable[str]:
+    for year in list_directory(f"{base_url}/"):
+        if not year.rstrip("/").isdigit():
+            continue
+        for month in list_directory(f"{base_url}/{year}"):
+            if not month.rstrip("/").isdigit():
+                continue
+            for day in list_directory(f"{base_url}/{year}{month}"):
+                if not day.rstrip("/").isdigit():
+                    continue
+                day_url = f"{base_url}/{year}{month}{day}"
+                for filename in list_directory(day_url):
+                    if filename.endswith(".csv"):
+                        yield f"{day_url}{filename}"
+
+
+def download_all_csvs() -> list[Path]:
+    downloaded: list[Path] = []
+    for url in iter_csv_urls(BASE_URL):
+        filename = url.split("/")[-1]
+        output_path = RAW_DIR / filename
+        if output_path.exists():
+            downloaded.append(output_path)
+            continue
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        output_path.write_bytes(response.content)
+        downloaded.append(output_path)
+        print(f"Downloaded {output_path}")
+    return downloaded
+
+
+def normalize_and_clean(paths: Iterable[Path]) -> pd.DataFrame:
+    frames = []
+    for path in paths:
+        csv_bytes = path.read_bytes()
+        frame = pd.read_csv(io.BytesIO(csv_bytes))
+        frame = frame.rename(
+            columns={
+                "TIMESTAMP": "timestamp",
+                "MMSI": "mmsi",
+                "LAT": "lat",
+                "LON": "lon",
+                "HEADING": "heading",
+                "SPEED": "sog",
+            }
+        )
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+        frame = frame.dropna(subset=["timestamp", "mmsi", "lat", "lon"])
+        frame = frame[(frame["lat"].between(-90, 90)) & (frame["lon"].between(-180, 180))]
+        frame = frame.drop_duplicates(subset=["timestamp", "mmsi", "lat", "lon"])
+        for column in ["sog", "cog", "heading", "nav_status"]:
+            if column not in frame.columns:
+                frame[column] = pd.NA
+        frames.append(
+            frame[
+                [
+                    "timestamp",
+                    "mmsi",
+                    "lat",
+                    "lon",
+                    "sog",
+                    "cog",
+                    "heading",
+                    "nav_status",
+                ]
+            ]
+        )
+    return pd.concat(frames, ignore_index=True)
+
+
+def resample_trajectories(frame: pd.DataFrame) -> pd.DataFrame:
+    frame = frame.sort_values(["mmsi", "timestamp"])
+    trajectories: list[pd.DataFrame] = []
+    for mmsi, group in frame.groupby("mmsi"):
+        group = group.set_index("timestamp").resample(RESAMPLE_FREQ).mean(numeric_only=True)
+        group["mmsi"] = mmsi
+        group = group.dropna(subset=["lat", "lon"])
+        if len(group) >= MIN_POINTS:
+            trajectories.append(group.reset_index())
+    return pd.concat(trajectories, ignore_index=True)
+
+
+def temporal_split(frame: pd.DataFrame) -> None:
+    frame = frame.sort_values("timestamp")
+    n_total = len(frame)
+    train_end = int(n_total * 0.70)
+    valid_end = int(n_total * 0.85)
+    frame.iloc[:train_end].to_parquet(SPLITS_DIR / "train.parquet", index=False)
+    frame.iloc[train_end:valid_end].to_parquet(SPLITS_DIR / "valid.parquet", index=False)
+    frame.iloc[valid_end:].to_parquet(SPLITS_DIR / "test.parquet", index=False)
+
+
+def main() -> None:
+    raw_files = download_all_csvs()
+    canonical = normalize_and_clean(raw_files)
+    canonical.to_parquet(PROCESSED_DIR / "ais_positions_canonical.parquet", index=False)
+    resampled = resample_trajectories(canonical)
+    resampled.to_parquet(PROCESSED_DIR / "ais_positions_resampled.parquet", index=False)
+    temporal_split(resampled)
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ## Next steps
