@@ -1,6 +1,17 @@
 # How to Train AISNet Models
 
-This guide shows how to download the **full AIS dataset** programmatically and prepare it for training vessel traffic prediction models. The examples assume the dataset is hosted as a single archive (or a set of archives) behind a URL or API token. Replace the placeholders with your data provider details.
+This guide shows how to download the **full AIS dataset** programmatically and prepare it for training vessel traffic prediction models. AISNet CSV files are hosted as daily/hourly files at:
+
+```
+https://data.meteo.uniparthenope.it/instruments/aisnet0/csv/YYYY/MM/DD/aisnet_YYYYMMDDZhh00.csv
+```
+
+Where:
+
+- `YYYY` is the year (4 digits).
+- `MM` is the month (01-12).
+- `DD` is the day of the month (01-31).
+- `hh` is the hour (00-23).
 
 ## Assumptions and folder layout
 
@@ -21,92 +32,57 @@ AISNet/
 
 ## Download the full dataset
 
-> Replace `DATASET_URL`, `DATASET_TOKEN`, and filenames with your provider’s details.
+Download the CSV files by iterating through the timestamps you need. The examples below fetch a full day or a time range and store the raw CSVs in `data/raw/aisnet`.
 
-### Python (streaming download with checksum verification)
+### Python (download a date range by hour)
 
 ```python
-import hashlib
-import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import requests
 
-DATASET_URL = "https://example-provider.com/ais/full-dataset.tar.zst"
-DATASET_TOKEN = os.environ.get("DATASET_TOKEN")
-OUTPUT_DIR = Path("data/raw")
+BASE_URL = "https://data.meteo.uniparthenope.it/instruments/aisnet0/csv"
+OUTPUT_DIR = Path("data/raw/aisnet")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_FILE = OUTPUT_DIR / "full-dataset.tar.zst"
-EXPECTED_SHA256 = "<replace-with-checksum>"
 
-headers = {"Authorization": f"Bearer {DATASET_TOKEN}"} if DATASET_TOKEN else {}
+start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+end = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
-with requests.get(DATASET_URL, headers=headers, stream=True, timeout=60) as response:
-    response.raise_for_status()
-    with open(OUTPUT_FILE, "wb") as file_handle:
-        for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
-            if chunk:
-                file_handle.write(chunk)
+current = start
+while current < end:
+    url = (
+        f"{BASE_URL}/{current:%Y}/{current:%m}/{current:%d}/"
+        f"aisnet_{current:%Y%m%d}Z{current:%H}00.csv"
+    )
+    out_file = OUTPUT_DIR / f"aisnet_{current:%Y%m%d}Z{current:%H}00.csv"
 
-sha256 = hashlib.sha256()
-with open(OUTPUT_FILE, "rb") as file_handle:
-    for chunk in iter(lambda: file_handle.read(8 * 1024 * 1024), b""):
-        sha256.update(chunk)
+    response = requests.get(url, timeout=60)
+    if response.status_code == 200:
+        out_file.write_bytes(response.content)
+        print(f"Downloaded {out_file}")
+    else:
+        print(f"Missing {url} -> {response.status_code}")
 
-if EXPECTED_SHA256 != "<replace-with-checksum>" and sha256.hexdigest() != EXPECTED_SHA256:
-    raise ValueError("Checksum mismatch; download may be corrupted.")
-
-print(f"Downloaded {OUTPUT_FILE}")
+    current += timedelta(hours=1)
 ```
 
-### Bash (curl + checksum)
+### Bash (download a single day)
 
 ```bash
-mkdir -p data/raw
-export DATASET_URL="https://example-provider.com/ais/full-dataset.tar.zst"
-export OUTPUT_FILE="data/raw/full-dataset.tar.zst"
-export EXPECTED_SHA256="<replace-with-checksum>"
+mkdir -p data/raw/aisnet
 
-curl -L "$DATASET_URL" -o "$OUTPUT_FILE"
+BASE_URL="https://data.meteo.uniparthenope.it/instruments/aisnet0/csv"
+DAY="2024-01-01"
 
-if [ "$EXPECTED_SHA256" != "<replace-with-checksum>" ]; then
-  echo "$EXPECTED_SHA256  $OUTPUT_FILE" | sha256sum --check -
-fi
-```
+for hour in $(seq -w 0 23); do
+  yyyy=$(date -u -d "$DAY" +"%Y")
+  mm=$(date -u -d "$DAY" +"%m")
+  dd=$(date -u -d "$DAY" +"%d")
+  url="$BASE_URL/$yyyy/$mm/$dd/aisnet_${yyyy}${mm}${dd}Z${hour}00.csv"
+  out="data/raw/aisnet/aisnet_${yyyy}${mm}${dd}Z${hour}00.csv"
 
-### Ruby (streaming download + checksum)
-
-```ruby
-require "digest"
-require "fileutils"
-require "net/http"
-require "uri"
-
-dataset_url = ENV.fetch("DATASET_URL", "https://example-provider.com/ais/full-dataset.tar.zst")
-output_dir = File.join("data", "raw")
-FileUtils.mkdir_p(output_dir)
-output_file = File.join(output_dir, "full-dataset.tar.zst")
-expected_sha256 = ENV.fetch("EXPECTED_SHA256", "<replace-with-checksum>")
-
-uri = URI.parse(dataset_url)
-Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
-  request = Net::HTTP::Get.new(uri)
-  http.request(request) do |response|
-    raise "Download failed: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-
-    File.open(output_file, "wb") do |file|
-      response.read_body do |chunk|
-        file.write(chunk)
-      end
-    end
-  end
-end
-
-digest = Digest::SHA256.file(output_file).hexdigest
-if expected_sha256 != "<replace-with-checksum>" && digest != expected_sha256
-  raise "Checksum mismatch; download may be corrupted."
-end
-
-puts "Downloaded #{output_file}"
+  curl -sfL "$url" -o "$out" || echo "Missing $url"
+done
 ```
 
 ## Prepare the dataset for training
@@ -138,7 +114,7 @@ Recommended canonical columns:
 | heading | float | Heading (degrees) |
 | nav_status | integer | AIS navigational status |
 
-If your data is in NMEA or AIS payload format, decode it into this schema and append to a single CSV or Parquet dataset. AISNet already logs CSV position reports with `TIMESTAMP, MMSI, LON, LAT, HEADING, SPEED` that can serve as a starting point.
+If your data is in NMEA or AIS payload format, decode it into this schema and append to a single CSV or Parquet dataset. AISNet already logs CSV position reports with `TIMESTAMP, MMSI, LON, LAT, HEADING, SPEED` that can serve as a starting point. The hosted AISNet CSVs at the URL above use the same columns.
 
 ### 3) Clean and filter
 

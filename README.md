@@ -25,6 +25,13 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
 
 ---
 
+## Documentation
+
+- [How to Train AISNet Models](docs/how_to_train.md)
+- [How to Prepare AISNet Data for Prediction](docs/how_to_predict.md)
+
+---
+
 ## Configuration (`config.json`)
 
 ### Minimal example (no repeater)
