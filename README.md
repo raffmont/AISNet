@@ -23,6 +23,7 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
   - If `repeater.remoteHost` and `repeater.remotePort` are set, each received raw AIS sentence
     (`!AIVDM/!AIVDO`) is forwarded to the remote endpoint using **TCP** (`tcpip`) or **UDP** (`udp`).
   - For UDP, you can enable `broadcast: true` (sets `SO_BROADCAST`).
+  - Set `repeater.mode` to `server` to listen for TCP clients and forward AIS sentences to each connected client.
 
 ---
 
@@ -78,6 +79,25 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
     "remotePort": 2000,
     "protocol": "udp",
     "broadcast": true
+  },
+  "output": {
+    "nmea": { "path": "data/nmea" },
+    "csv":  { "path": "data/csv" }
+  },
+  "webserver_server": { "enabled": true, "port": 8081 }
+}
+```
+
+### Example with repeater (TCP server mode)
+
+```json
+{
+  "server": { "port": 2000 },
+  "repeater": {
+    "mode": "server",
+    "listenHost": "0.0.0.0",
+    "remotePort": 2010,
+    "protocol": "tcpip"
   },
   "output": {
     "nmea": { "path": "data/nmea" },
