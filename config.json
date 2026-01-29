@@ -7,8 +7,15 @@
       "path": "data/nmea"
     },
     "csv": {
-      "path": "data/logs"
+      "path": "data/csv"
     }
+  },
+  "repeater": {
+    "enabled": true,
+    "mode": "server",
+    "listenHost": "0.0.0.0",
+    "listenPort": 10111,
+    "protocol": "tcpip"
   },
   "webserver_server": {
     "enabled": true,
