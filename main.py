@@ -104,11 +104,7 @@ class RepeaterCfg:
     listenPort: Optional[int] = None  # server bind port (tcp only)
 
     def is_enabled(self) -> bool:
-        if not self.enabled:
-            return False
-        if self.mode == "server":
-            return bool(self.listenPort)
-        return bool(self.remoteHost) and bool(self.remotePort)
+        return self.enabled
 
 
 @dataclass
@@ -169,10 +165,14 @@ class ServerConfig:
             raise ValueError('repeater.mode must be "client" or "server"')
         if repeater.protocol not in ("tcpip", "udp"):
             raise ValueError('repeater.protocol must be "tcpip" or "udp"')
-        if repeater.is_enabled():
+        if repeater.enabled:
             if repeater.mode == "client":
                 if bool(repeater.remoteHost) ^ bool(repeater.remotePort):
                     raise ValueError("repeater.remoteHost and repeater.remotePort must both be set for client mode")
+                if not repeater.remoteHost or repeater.remotePort is None:
+                    raise ValueError("repeater.remoteHost and repeater.remotePort must be set when repeater.enabled is true")
+                if not (1 <= int(repeater.remotePort) <= 65535):
+                    raise ValueError("repeater.remotePort must be in 1..65535")
             if repeater.mode == "server":
                 if repeater.protocol != "tcpip":
                     raise ValueError('repeater.protocol must be "tcpip" when repeater.mode is "server"')
@@ -180,9 +180,6 @@ class ServerConfig:
                     raise ValueError("repeater.listenPort must be set when repeater.mode is server")
                 if not (1 <= int(repeater.listenPort) <= 65535):
                     raise ValueError("repeater.listenPort must be in 1..65535")
-            if repeater.mode == "client":
-                if not (1 <= int(repeater.remotePort) <= 65535):
-                    raise ValueError("repeater.remotePort must be in 1..65535")
 
         if webserver.enabled and not (1 <= webserver.port <= 65535):
             raise ValueError("webserver_server.port must be in 1..65535")
@@ -802,7 +799,7 @@ def run_server(cfg: ServerConfig) -> None:
 
     nmea_writer = RotatingTextWriter(cfg.nmea.path, suffix="nmea")
     csv_writer = RotatingCsvWriter(cfg.csv.path)
-    repeater = Repeater(cfg.repeater) if cfg.repeater.is_enabled() else None
+    repeater = Repeater(cfg.repeater) if cfg.repeater.enabled else None
     web_server: Optional[ThreadingHTTPServer] = None
     if cfg.webserver.enabled:
         web_server = start_output_web_server(cfg.webserver, cfg.nmea.path, cfg.csv.path)
