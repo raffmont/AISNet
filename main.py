@@ -328,18 +328,29 @@ class Repeater:
         self._clients_lock = threading.Lock()
         self._shutdown_event = threading.Event()
         self._accept_thread: Optional[threading.Thread] = None
+        self._started = False
 
         if not cfg.is_enabled():
             return
+        self.start()
 
-        if cfg.mode == "server":
-            self._start_server()
+    def start(self) -> None:
+        if self._started or not self.cfg.is_enabled():
             return
 
-        if cfg.protocol == "udp":
+        if self.cfg.mode == "server":
+            self._start_server()
+            self._started = True
+            return
+
+        if self.cfg.protocol == "udp":
             self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            if cfg.broadcast:
+            if self.cfg.broadcast:
                 self._udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self._started = True
+
+    def is_listening(self) -> bool:
+        return self._srv_sock is not None
 
     def _start_server(self) -> None:
         bind_host = self.cfg.listenHost or "0.0.0.0"
@@ -807,10 +818,15 @@ def run_server(cfg: ServerConfig) -> None:
     try:
         logging.info("Starting TCP server on 0.0.0.0:%d", cfg.port)
         if repeater:
+            repeater.start()
             if cfg.repeater.mode == "server":
                 bind_host = cfg.repeater.listenHost or "0.0.0.0"
-                logging.info("Repeater enabled (server): tcpip://%s:%s",
-                             bind_host, cfg.repeater.listenPort)
+                if repeater.is_listening():
+                    logging.info("Repeater enabled (server): tcpip://%s:%s",
+                                 bind_host, cfg.repeater.listenPort)
+                else:
+                    logging.error("Repeater server failed to start on tcpip://%s:%s",
+                                  bind_host, cfg.repeater.listenPort)
             else:
                 logging.info("Repeater enabled (client): %s://%s:%s (broadcast=%s)",
                              cfg.repeater.protocol, cfg.repeater.remoteHost, cfg.repeater.remotePort, cfg.repeater.broadcast)
