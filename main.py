@@ -20,6 +20,7 @@ Features
     For UDP, broadcast can be enabled.
     The repeater can also run in server mode, accepting TCP clients and sending AIS sentences
     to each connected client.
+    Set repeater.enabled to false to disable the repeater without removing its configuration.
 
 Run
   python3 main.py -c config.json
@@ -93,6 +94,7 @@ class OutputCfg:
 
 @dataclass
 class RepeaterCfg:
+    enabled: bool = True
     remoteHost: Optional[str] = None
     remotePort: Optional[int] = None
     protocol: str = "tcpip"  # "tcpip" or "udp"
@@ -100,7 +102,9 @@ class RepeaterCfg:
     mode: str = "client"  # "client" or "server"
     listenHost: Optional[str] = None  # server bind host (tcp only)
 
-    def enabled(self) -> bool:
+    def is_enabled(self) -> bool:
+        if not self.enabled:
+            return False
         if self.mode == "server":
             return bool(self.remotePort)
         return bool(self.remoteHost) and bool(self.remotePort)
@@ -139,6 +143,7 @@ class ServerConfig:
             # repeater (optional)
             rep_cfg_raw = cfg.get("repeater", {}) or {}
             repeater = RepeaterCfg(
+                enabled=bool(rep_cfg_raw.get("enabled", True)),
                 remoteHost=rep_cfg_raw.get("remoteHost"),
                 remotePort=int(rep_cfg_raw["remotePort"]) if rep_cfg_raw.get("remotePort") is not None else None,
                 protocol=str(rep_cfg_raw.get("protocol", "tcpip")).lower(),
@@ -162,16 +167,15 @@ class ServerConfig:
             raise ValueError('repeater.mode must be "client" or "server"')
         if repeater.protocol not in ("tcpip", "udp"):
             raise ValueError('repeater.protocol must be "tcpip" or "udp"')
-        if repeater.mode == "client":
-            if bool(repeater.remoteHost) ^ bool(repeater.remotePort):
-                raise ValueError("repeater.remoteHost and repeater.remotePort must both be set for client mode")
-        if repeater.mode == "server":
-            if repeater.protocol != "tcpip":
-                raise ValueError('repeater.protocol must be "tcpip" when repeater.mode is "server"')
-            if repeater.remotePort is None:
-                raise ValueError("repeater.remotePort must be set when repeater.mode is server")
-
-        if repeater.enabled():
+        if repeater.is_enabled():
+            if repeater.mode == "client":
+                if bool(repeater.remoteHost) ^ bool(repeater.remotePort):
+                    raise ValueError("repeater.remoteHost and repeater.remotePort must both be set for client mode")
+            if repeater.mode == "server":
+                if repeater.protocol != "tcpip":
+                    raise ValueError('repeater.protocol must be "tcpip" when repeater.mode is "server"')
+                if repeater.remotePort is None:
+                    raise ValueError("repeater.remotePort must be set when repeater.mode is server")
             if not (1 <= int(repeater.remotePort) <= 65535):
                 raise ValueError("repeater.remotePort must be in 1..65535")
 
@@ -323,7 +327,7 @@ class Repeater:
         self._shutdown_event = threading.Event()
         self._accept_thread: Optional[threading.Thread] = None
 
-        if not cfg.enabled():
+        if not cfg.is_enabled():
             return
 
         if cfg.mode == "server":
@@ -362,7 +366,7 @@ class Repeater:
                 self._clients.append(conn)
 
     def _tcp_connect(self) -> None:
-        if not self.cfg.enabled():
+        if not self.cfg.is_enabled():
             return
         if self.cfg.protocol != "tcpip":
             return
@@ -391,7 +395,7 @@ class Repeater:
         Forward one raw AIS NMEA sentence.
         The line is sent as ASCII with CRLF termination.
         """
-        if not self.cfg.enabled():
+        if not self.cfg.is_enabled():
             return
 
         payload = (line.rstrip("\r\n") + "\r\n").encode("ascii", errors="ignore")
@@ -793,7 +797,7 @@ def run_server(cfg: ServerConfig) -> None:
 
     nmea_writer = RotatingTextWriter(cfg.nmea.path, suffix="nmea")
     csv_writer = RotatingCsvWriter(cfg.csv.path)
-    repeater = Repeater(cfg.repeater) if cfg.repeater.enabled() else None
+    repeater = Repeater(cfg.repeater) if cfg.repeater.is_enabled() else None
     web_server: Optional[ThreadingHTTPServer] = None
     if cfg.webserver.enabled:
         web_server = start_output_web_server(cfg.webserver, cfg.nmea.path, cfg.csv.path)
