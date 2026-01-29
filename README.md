@@ -109,6 +109,26 @@ AISNet is a lightweight TCP server that receives NMEA 0183 sentences (including 
 }
 ```
 
+### Annotated repeater server config (line-by-line)
+
+```jsonc
+{
+  "server": { "port": 2000 }, // Main TCP listener for incoming NMEA sentences.
+  "output": { // Where raw NMEA and decoded CSV files are stored.
+    "nmea": { "path": "data/nmea" }, // Raw NMEA log directory (relative to /app in Docker).
+    "csv":  { "path": "data/csv" } // CSV output directory for decoded AIS position reports.
+  },
+  "repeater": { // Enable the built-in TCP repeater server.
+    "enabled": true, // Keep the repeater active (set false to disable without removing config).
+    "mode": "server", // Run as a server that accepts TCP clients.
+    "listenHost": "0.0.0.0", // Bind on all interfaces so Docker can publish the port.
+    "listenPort": 10111, // The port clients connect to (must be published in Docker).
+    "protocol": "tcpip" // Required when using server mode.
+  },
+  "webserver_server": { "enabled": true, "port": 8081 } // Optional HTTP file browser.
+}
+```
+
 ### Example with repeater disabled
 
 ```json
