@@ -19,7 +19,7 @@ Features
     (!AIVDM/!AIVDO) is forwarded to the remote endpoint using TCP or UDP (configurable).
     For UDP, broadcast can be enabled.
     The repeater can also run in server mode, accepting TCP clients and sending AIS sentences
-    to each connected client.
+    to each connected client (use repeater.listenPort for server mode).
     Set repeater.enabled to false to disable the repeater without removing its configuration.
 
 Run
@@ -101,12 +101,13 @@ class RepeaterCfg:
     broadcast: bool = False  # UDP only
     mode: str = "client"  # "client" or "server"
     listenHost: Optional[str] = None  # server bind host (tcp only)
+    listenPort: Optional[int] = None  # server bind port (tcp only)
 
     def is_enabled(self) -> bool:
         if not self.enabled:
             return False
         if self.mode == "server":
-            return bool(self.remotePort)
+            return bool(self.listenPort)
         return bool(self.remoteHost) and bool(self.remotePort)
 
 
@@ -150,6 +151,7 @@ class ServerConfig:
                 broadcast=bool(rep_cfg_raw.get("broadcast", False)),
                 mode=str(rep_cfg_raw.get("mode", "client")).lower(),
                 listenHost=rep_cfg_raw.get("listenHost"),
+                listenPort=int(rep_cfg_raw["listenPort"]) if rep_cfg_raw.get("listenPort") is not None else None,
             )
 
             web_cfg_raw = cfg.get("webserver_server", {}) or {}
@@ -174,10 +176,13 @@ class ServerConfig:
             if repeater.mode == "server":
                 if repeater.protocol != "tcpip":
                     raise ValueError('repeater.protocol must be "tcpip" when repeater.mode is "server"')
-                if repeater.remotePort is None:
-                    raise ValueError("repeater.remotePort must be set when repeater.mode is server")
-            if not (1 <= int(repeater.remotePort) <= 65535):
-                raise ValueError("repeater.remotePort must be in 1..65535")
+                if repeater.listenPort is None:
+                    raise ValueError("repeater.listenPort must be set when repeater.mode is server")
+                if not (1 <= int(repeater.listenPort) <= 65535):
+                    raise ValueError("repeater.listenPort must be in 1..65535")
+            if repeater.mode == "client":
+                if not (1 <= int(repeater.remotePort) <= 65535):
+                    raise ValueError("repeater.remotePort must be in 1..65535")
 
         if webserver.enabled and not (1 <= webserver.port <= 65535):
             raise ValueError("webserver_server.port must be in 1..65535")
@@ -343,13 +348,13 @@ class Repeater:
         bind_host = self.cfg.listenHost or "0.0.0.0"
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((bind_host, int(self.cfg.remotePort)))
+        srv.bind((bind_host, int(self.cfg.listenPort)))
         srv.listen(5)
         srv.settimeout(1.0)
         self._srv_sock = srv
         self._accept_thread = threading.Thread(target=self._accept_loop, name="aisnet-repeater", daemon=True)
         self._accept_thread.start()
-        logging.info("Repeater server listening on %s:%s", bind_host, self.cfg.remotePort)
+        logging.info("Repeater server listening on %s:%s", bind_host, self.cfg.listenPort)
 
     def _accept_loop(self) -> None:
         assert self._srv_sock is not None
@@ -808,7 +813,7 @@ def run_server(cfg: ServerConfig) -> None:
             if cfg.repeater.mode == "server":
                 bind_host = cfg.repeater.listenHost or "0.0.0.0"
                 logging.info("Repeater enabled (server): tcpip://%s:%s",
-                             bind_host, cfg.repeater.remotePort)
+                             bind_host, cfg.repeater.listenPort)
             else:
                 logging.info("Repeater enabled (client): %s://%s:%s (broadcast=%s)",
                              cfg.repeater.protocol, cfg.repeater.remoteHost, cfg.repeater.remotePort, cfg.repeater.broadcast)
